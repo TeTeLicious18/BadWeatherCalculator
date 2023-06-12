@@ -1,0 +1,73 @@
+#include <iostream>
+#include <curl/curl.h>
+#include "nlohmann/json.hpp"
+
+using json = nlohmann::json;
+
+// Function to handle HTTP response
+size_t handle_response(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    std::string *response = static_cast<std::string*>(userdata);
+    response->append(ptr, size * nmemb);
+    return size * nmemb;
+}
+
+int main() {
+    // Replace "Bucharest,ro" with your location
+    const std::string url = "http://api.weatherstack.com/current?access_key=YOUR_ACCESS_KEY&query=Bucharest,ro&units=m&fields=weather_code,cloudcover";
+
+    // Initialize libcurl
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        std::cerr << "Error: Could not initialize libcurl" << std::endl;
+        return 1;
+    }
+
+    // Set options for libcurl
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, handle_response);
+    std::string response;
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+    // Perform the HTTP request
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+        std::cerr << "Error: Could not perform HTTP request: " << curl_easy_strerror(res) << std::endl;
+        curl_easy_cleanup(curl);
+        return 1;
+    }
+
+    // Cleanup libcurl
+    curl_easy_cleanup(curl);
+
+    // Parse JSON response
+    json doc = json::parse(response);
+
+    // Check for errors in JSON response
+    if (doc.find("success") != doc.end() && !doc["success"].get<bool>()) {
+        std::cerr << "Error: " << doc["error"]["info"].get<std::string>() << std::endl;
+        return 1;
+    }
+
+    // Check for bad weather clouds
+    bool has_bad_weather = false;
+    std::string bad_weather_cloud;
+    std::string observation_time;
+    if (doc.find("current") != doc.end() && doc["current"].is_object()) {
+        const json& current = doc["current"];
+        if (current.find("cloudcover") != current.end() && current["cloudcover"].get<int>() > 50) {
+            has_bad_weather = true;
+            bad_weather_cloud = current["weather_descriptions"][0].get<std::string>();
+            observation_time = current["observation_time"].get<std::string>();
+        }
+    }
+
+    // Output results
+    if (has_bad_weather) {
+        std::cout << "The closest bad weather cloud (" << bad_weather_cloud << ") is approaching your location. It will rain in approximately 30 minutes." << std::endl;
+        std::cout << "Observation time: " << observation_time << std::endl;
+    } else {
+        std::cout << "No bad weather clouds are currently approaching your location." << std::endl;
+    }
+
+    return 0;
+}
